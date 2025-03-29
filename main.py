@@ -76,7 +76,20 @@
 
 
 
-from fastapi import FastAPI
+# from fastapi import FastAPI
+#
+# app = FastAPI()
+#
+# @app.get("/")
+# def read_root():
+#     return {"message": "Hello, World!"}
+
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+import os
 
 app = FastAPI()
 
@@ -84,3 +97,62 @@ app = FastAPI()
 def read_root():
     return {"message": "Hello, World!"}
 
+# Pydantic model for request body validation
+class WordRequest(BaseModel):
+    word: str
+
+# File path (in the same directory)
+FILE_PATH = os.path.join(os.path.dirname(__file__), "words.txt")
+
+
+# Endpoint to handle POST request
+@app.post("/add-word/")
+async def add_word(word_request: WordRequest):
+    word = word_request.word
+
+    # Validate word is not empty
+    if not word.strip():
+        raise HTTPException(status_code=400, detail="Word cannot be empty")
+
+    # Write word to file
+    try:
+        write_word_to_file(word)
+        return JSONResponse(
+            status_code=200,
+            content={"message": f"Word '{word}' successfully written to file"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Function to write word to file
+def write_word_to_file(word: str):
+    file_path = os.path.join(os.path.dirname(__file__), "words.txt")
+
+    # Open file in append mode (creates file if it doesn't exist)
+    with open(file_path, "a") as file:
+        file.write(word + "\n")
+
+
+# GET endpoint: Returns the file
+@app.get("/get-words/")
+async def get_words():
+    try:
+        # Create file if it doesn't exist
+        if not os.path.exists(FILE_PATH):
+            open(FILE_PATH, "w").close()  # Create empty file
+
+        return FileResponse(
+            FILE_PATH,
+            media_type="text/plain",  # Plain text file
+            filename="words.txt"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# For testing
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=3000)
