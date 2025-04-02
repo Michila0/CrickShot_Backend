@@ -6,6 +6,8 @@ from PIL import Image
 from torchvision import transforms
 import torchvision.models as models
 import time
+import os
+from pathlib import Path
 
 
 # Load your trained model
@@ -110,16 +112,25 @@ def process_video(video_path, model_path, output_path=None):
         out.release()
     cv2.destroyAllWindows()
 
-def classifyShot(video_path):
+def classifyShot(input_path: str, output_path: str):
     model_path = "./best_model.pth"  # Your trained model
-    output_path = "./output/output_video.mp4"  # Optional: Save processed video
 
-    process_video(video_path, model_path, output_path)
+    # Ensure output directory exists
+    output_dir = os.path.dirname(output_path)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
-if __name__ == "__main__":
-    # Example usage
-    video_path = "test/PullShot00003100.mov"  # Replace with your video path
-    model_path = "./best_model.pth"  # Your trained model
-    output_path = "./output/output_video.mp4"  # Optional: Save processed video
+    try:
+        process_video(input_path, model_path, output_path)
+        return True
+    except Exception as e:
+        print(f"Error processing video: {str(e)}")
+        return False
 
-    process_video(video_path, model_path, output_path)
+# if __name__ == "__main__":
+#     # Example usage
+#     video_path = "test/PullShot00003100.mov"  # Replace with your video path
+#     model_path = "./best_model.pth"  # Your trained model
+#     output_path = "./output/output_video.mp4"  # Optional: Save processed video
+#
+#     process_video(video_path, model_path, output_path)

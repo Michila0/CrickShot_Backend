@@ -10,8 +10,13 @@ import os
 from pathlib import Path
 import video_classifier
 from video_classifier import classifyShot
+import logging
 
 app = FastAPI()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # CORS Configuration
 app.add_middleware(
@@ -21,41 +26,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Roboflow Configuration
-ROBOFLOW_API_KEY = "YOUR_ROBOFLOW_API_KEY"
-ROBOFLOW_MODEL_ENDPOINT = f"https://detect.roboflow.com/crickshotsrilanka/2?api_key={ROBOFLOW_API_KEY}"
-
 # Configure upload directory
-UPLOAD_DIR = Path("uploads")
-os.makedirs(UPLOAD_DIR, exist_ok=True)  # Create directory if it doesn't exist
+UPLOAD_DIR = Path("upload")
+OUTPUT_DIR = Path("output")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-#Extract Frames
-def extract_frames(video_path: str, output_dir: str, frame_rate: int = 1) -> List[str]:
-    """Extract frames from video using ffmpeg"""
-    os.makedirs(output_dir, exist_ok=True)
-    frames = []
-    try:
-        (
-            ffmpeg.input(video_path)
-            .filter('fps', fps=frame_rate)
-            .output(os.path.join(output_dir, 'frame_%04d.png'))
-            .run(quiet=True)
-        )
-        frames = sorted([os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.endswith('.png')])
-    except ffmpeg.Error as e:
-        print(f"FFmpeg error: {e.stderr.decode()}")
-    return frames
 
-#Predict the Roboflow
-def predict_with_roboflow(image_path: str) -> Dict:
-    """Send image to Roboflow for prediction"""
-    with open(image_path, "rb") as f:
-        response = requests.post(
-            ROBOFLOW_MODEL_ENDPOINT,
-            files={"file": f},
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-    return response.json()
+def get_unique_filename(original_name: str) -> str:
+    """Generate a unique filename to prevent conflicts"""
+    ext = Path(original_name).suffix
+    return f"{uuid.uuid4().hex}{ext}"
 
 
 @app.get("/")
@@ -63,54 +44,71 @@ def read_root():
     return {"message": "Video File Upload API"}
 
 
-# Endpoint to upload video files
 @app.post("/upload-video")
 async def upload_video(file: UploadFile = File(...)):
     try:
-        # Save uploaded video
-        video_id = uuid.uuid4().hex
-        video_path = os.path.join(UPLOAD_DIR, f"{video_id}.mp4")
+        # Validate file extension
+        allowed_extensions = {".mp4", ".mov", ".avi"}
+        file_ext = Path(file.filename).suffix.lower()
 
-        with open(video_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        if file_ext not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file type. Allowed: {', '.join(allowed_extensions)}"
+            )
 
-        # Extract frames (1 frame per second)
-        frames_dir = os.path.join(UPLOAD_DIR, video_id)
-        frames = extract_frames(video_path, frames_dir, frame_rate=1)
+        # Generate unique filename and save
+        unique_filename = get_unique_filename(file.filename)
+        file_path = UPLOAD_DIR / unique_filename
+        output_path = OUTPUT_DIR / f"processed_{unique_filename}"
 
-        if not frames:
-            raise HTTPException(status_code=400, detail="No frames extracted")
+        logger.info(f"Saving uploaded file to: {file_path}")
+        with open(file_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
 
-        # Process each frame
-        predictions = []
-        for frame_path in frames[:5]:  # Limit to 5 frames for demo
-            prediction = predict_with_roboflow(frame_path)
-            predictions.append({
-                "frame": os.path.basename(frame_path),
-                "prediction": prediction
-            })
+        # Process the video
+        logger.info(f"Starting video processing for: {file_path}")
+        try:
+            classifyShot(str(file_path), str(output_path))  # Modified to accept output path
+        except Exception as processing_error:
+            logger.error(f"Video processing failed: {str(processing_error)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Video processing error: {str(processing_error)}"
+            )
 
-        classifyShot(video_path)
-        # Cleanup
-        shutil.rmtree(frames_dir)
-        os.remove(video_path)
+        # Verify the output file exists
+        if not output_path.exists():
+            logger.error(f"Output file not found at: {output_path}")
+            raise HTTPException(
+                status_code=500,
+                detail="Video processing failed - output file not created"
+            )
 
-        return {"predictions": predictions}
+        logger.info(f"Successfully processed video. Output at: {output_path}")
 
+        # Return the processed video file
+        return FileResponse(
+            path=output_path,
+            media_type="video/mp4",
+            filename=f"classified_{file.filename}"
+        )
+
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
     except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Endpoint to get video file
 @app.get("/get-video/{filename}")
 async def get_video(filename: str):
-    file_path = UPLOAD_DIR / filename
+    file_path = OUTPUT_DIR / filename
 
-    # Check if file exists
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
-    # Check if file is video
     if file_path.suffix.lower() not in {".mp4", ".mov", ".avi"}:
         raise HTTPException(status_code=400, detail="Not a video file")
 
@@ -121,7 +119,6 @@ async def get_video(filename: str):
     )
 
 
-# Run the app
 if __name__ == "__main__":
     import uvicorn
 
