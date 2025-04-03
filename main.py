@@ -8,7 +8,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict
 import os
 from pathlib import Path
-import video_classifier
 from video_classifier import classifyShot
 import logging
 
@@ -21,7 +20,8 @@ logger = logging.getLogger(__name__)
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*", "http://localhost:5178/"],
+    allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -102,21 +102,21 @@ async def upload_video(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/get-video/{filename}")
-async def get_video(filename: str):
-    file_path = OUTPUT_DIR / filename
-
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-
-    if file_path.suffix.lower() not in {".mp4", ".mov", ".avi"}:
-        raise HTTPException(status_code=400, detail="Not a video file")
-
-    return FileResponse(
-        file_path,
-        media_type="video/mp4" if file_path.suffix == ".mp4" else "video/quicktime",
-        filename=filename
-    )
+# @app.get("/get-video/{filename}")
+# async def get_video(filename: str):
+#     file_path = OUTPUT_DIR / filename
+#
+#     if not file_path.exists():
+#         raise HTTPException(status_code=404, detail="File not found")
+#
+#     if file_path.suffix.lower() not in {".mp4", ".mov", ".avi"}:
+#         raise HTTPException(status_code=400, detail="Not a video file")
+#
+#     return FileResponse(
+#         file_path,
+#         media_type="video/mp4" if file_path.suffix == ".mp4" else "video/quicktime",
+#         filename=filename
+#     )
 
 
 if __name__ == "__main__":
