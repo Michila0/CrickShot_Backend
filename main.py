@@ -1,15 +1,12 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
-import ffmpeg
-import requests
-import uuid
-import shutil
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Dict
-import os
 from pathlib import Path
 from video_classifier import classifyShot
+import os  # Keep this - it's actually used for path operations
+import uuid
 import logging
+import mimetypes
 
 app = FastAPI()
 
@@ -26,23 +23,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configure upload directory
-UPLOAD_DIR = Path("upload")
-OUTPUT_DIR = Path("output")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+# Configure directories
+BASE_DIR = Path(__file__).parent
+UPLOAD_DIR = BASE_DIR / "uploads"
+OUTPUT_DIR = BASE_DIR / "outputs"
 
+# Create directories if they don't exist
+UPLOAD_DIR.mkdir(exist_ok=True)
+OUTPUT_DIR.mkdir(exist_ok=True)
 
 def get_unique_filename(original_name: str) -> str:
     """Generate a unique filename to prevent conflicts"""
     ext = Path(original_name).suffix
     return f"{uuid.uuid4().hex}{ext}"
 
-
 @app.get("/")
 def read_root():
     return {"message": "Video File Upload API"}
 
+""""Stream Processing Pipline"""
+async def stream_video(file_path: Path):
+    """Generator function to stream video content"""
+    with open(file_path, "rb") as video_file:
+        while chunk := video_file.read(1024 * 1024):  # 1MB chunks
+            yield chunk
 
 @app.post("/upload-video")
 async def upload_video(file: UploadFile = File(...)):
@@ -57,30 +61,37 @@ async def upload_video(file: UploadFile = File(...)):
                 detail=f"Invalid file type. Allowed: {', '.join(allowed_extensions)}"
             )
 
-        # Generate unique filename and save
+        # Generate unique filenames
         unique_filename = get_unique_filename(file.filename)
         file_path = UPLOAD_DIR / unique_filename
-        output_path = OUTPUT_DIR / f"processed_{unique_filename}"
+        output_path = OUTPUT_DIR / unique_filename
 
+        # Save uploaded file
         logger.info(f"Saving uploaded file to: {file_path}")
         with open(file_path, "wb") as buffer:
-            content = await file.read()
-            buffer.write(content)
+            while chunk := await file.read(1024 * 1024):  # 1MB chunks
+                buffer.write(chunk)
 
         # Process the video
         logger.info(f"Starting video processing for: {file_path}")
         try:
-            classifyShot(str(file_path), str(output_path))  # Modified to accept output path
+            success = classifyShot(str(file_path), str(output_path))
+            if not success:
+                raise Exception("Video processing returned False")
         except Exception as processing_error:
             logger.error(f"Video processing failed: {str(processing_error)}")
+            # Clean up files
+            if file_path.exists():
+                file_path.unlink()
+            if output_path.exists():
+                output_path.unlink()
             raise HTTPException(
                 status_code=500,
                 detail=f"Video processing error: {str(processing_error)}"
             )
 
-        # Verify the output file exists
+        # Verify output file
         if not output_path.exists():
-            logger.error(f"Output file not found at: {output_path}")
             raise HTTPException(
                 status_code=500,
                 detail="Video processing failed - output file not created"
@@ -88,38 +99,28 @@ async def upload_video(file: UploadFile = File(...)):
 
         logger.info(f"Successfully processed video. Output at: {output_path}")
 
-        # Return the processed video file
-        return FileResponse(
-            path=output_path,
-            media_type="video/mp4",
-            filename=f"classified_{file.filename}"
+        # Determine content type
+        content_type, _ = mimetypes.guess_type(output_path)
+        if content_type is None:
+            content_type = "video/mp4"  # default to mp4
+
+        # Return streaming response
+        return StreamingResponse(
+            stream_video(output_path),
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f"attachment; filename=processed_{file.filename}",
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "no-cache"
+            }
         )
 
     except HTTPException:
-        raise  # Re-raise HTTP exceptions
+        raise
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# @app.get("/get-video/{filename}")
-# async def get_video(filename: str):
-#     file_path = OUTPUT_DIR / filename
-#
-#     if not file_path.exists():
-#         raise HTTPException(status_code=404, detail="File not found")
-#
-#     if file_path.suffix.lower() not in {".mp4", ".mov", ".avi"}:
-#         raise HTTPException(status_code=400, detail="Not a video file")
-#
-#     return FileResponse(
-#         file_path,
-#         media_type="video/mp4" if file_path.suffix == ".mp4" else "video/quicktime",
-#         filename=filename
-#     )
-
-
 if __name__ == "__main__":
     import uvicorn
-
-    uvicorn.run(app, host="127.0.0.1", port=3000)
+    uvicorn.run(app, host="0.0.0.0", port=5000)

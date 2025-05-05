@@ -31,7 +31,8 @@ class ShotClassifier:
         num_ftrs = model.fc.in_features
         model.fc = nn.Sequential(
             nn.Dropout(0.5),
-            nn.Linear(num_ftrs, 4))
+            nn.Linear(num_ftrs, 4)
+        )
         return model.to(self.device)
 
     def predict(self, image):
@@ -126,11 +127,3 @@ def classifyShot(input_path: str, output_path: str):
     except Exception as e:
         print(f"Error processing video: {str(e)}")
         return False
-
-# if __name__ == "__main__":
-#     # Example usage
-#     video_path = "test/PullShot00003100.mov"  # Replace with your video path
-#     model_path = "./best_model.pth"  # Your trained model
-#     output_path = "./output/output_video.mp4"  # Optional: Save processed video
-#
-#     process_video(video_path, model_path, output_path)
