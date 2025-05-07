@@ -23,7 +23,7 @@ np.random.seed(42)
 """Custom Dataset Class"""
 class CustomImageDataset(Dataset):
     def __init__(self, image_paths, labels, transform=None):
-        self.image_paths = image_paths
+        self.image_paths = image_paths #collected data
         self.labels = labels
         self.transform = transform
 
@@ -82,11 +82,11 @@ train_transform = transforms.Compose([
     transforms.Resize((150, 150)), # Resize images
     transforms.RandomHorizontalFlip(), # Data augmentation
     transforms.RandomRotation(30),
-    transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
-    transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),
+    transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)), #Random shifts
+    transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1), #Random color adjustments
     transforms.RandomPerspective(distortion_scale=0.2, p=0.5),
-    transforms.ToTensor(), # Convert to tensor
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) # Standardize
+    transforms.ToTensor(), # Convert to PyTorch tensor
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) # ImageNet normalization
 ])
 
 # Simple transform for validation and test
@@ -124,6 +124,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
     train_accuracies = []
     val_accuracies = []
 
+    # Training Process
     for epoch in range(num_epochs):
         model.train() # Set training mode
         running_loss = 0.0
@@ -141,7 +142,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
             optimizer.step() # Update weight
 
             running_loss += loss.item()
-            _, preds = torch.max(outputs, 1)
+            _, preds = torch.max(outputs, 1) #shot Classification
             correct += (preds == labels).sum().item()
             total += labels.size(0)
 
@@ -263,7 +264,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # K-Fold Cross Validation
 kf = KFold(n_splits=5, shuffle=True, random_state=42)
-fold_results = []
+fold_results = [] # Tracks accuracy per fold
 
 for fold, (train_idx, val_idx) in enumerate(kf.split(all_image_paths)):
     print(f"\n{'=' * 40}")

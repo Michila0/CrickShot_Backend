@@ -45,7 +45,7 @@ def read_root():
 async def stream_video(file_path: Path):
     """Generator function to stream video content"""
     with open(file_path, "rb") as video_file:
-        while chunk := video_file.read(1024 * 1024):  # 1MB chunks
+        while chunk := video_file.read(1024 * 1024):
             yield chunk
 
 @app.post("/upload-video")

@@ -46,7 +46,7 @@ class ShotClassifier:
         # Predict
         with torch.no_grad():
             outputs = self.model(image_tensor)
-            _, preds = torch.max(outputs, 1)
+            _, preds = torch.max(outputs, 1) #shot classification
 
         return self.class_names[preds.item()]
 
@@ -76,7 +76,7 @@ def process_video(video_path, model_path, output_path=None):
     frame_count = 0
 
     while True:
-        ret, frame = cap.read()
+        ret, frame = cap.read() # Extract frames
         if not ret:
             break
 
