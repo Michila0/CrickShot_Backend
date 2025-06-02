@@ -80,7 +80,7 @@ def show_images(dataset, num_images=6):
 # Stronger data augmentation for training
 train_transform = transforms.Compose([
     transforms.Resize((150, 150)), # Resize images
-    transforms.RandomHorizontalFlip(), # Data augmentation
+    transforms.RandomHorizontalFlip(),
     transforms.RandomRotation(30),
     transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)), #Random shifts
     transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1), #Random color adjustments
