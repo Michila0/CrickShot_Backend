@@ -1,4 +1,4 @@
-# Tendency Of Employees To Leave The Organization
+# Cricket Shot Detection
 
 ### Install virtualenv
 
