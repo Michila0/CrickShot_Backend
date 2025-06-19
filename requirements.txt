@@ -9,4 +9,5 @@ uvicorn
 python-jose
 passlib
 
-
+firebase-admin
+python-dotenv

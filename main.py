@@ -1,12 +1,15 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.params import Path as FastAPIPath  # Renamed to avoid conflict
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pathlib import Path
-from video_classifier import classifyShot
-import os  # Keep this - it's actually used for path operations
+from pathlib import Path  # This is for filesystem paths
+import os
 import uuid
 import logging
 import mimetypes
+from video_classifier import classifyShot
+from typing import List, Dict 
+import re
 
 app = FastAPI()
 
@@ -34,22 +37,23 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 
 def get_unique_filename(original_name: str) -> str:
     """Generate a unique filename to prevent conflicts"""
-    ext = Path(original_name).suffix
-    return f"{uuid.uuid4().hex}{ext}"
+    return f"{uuid.uuid4().hex}-{original_name}"
 
 @app.get("/")
 def read_root():
     return {"message": "Video File Upload API"}
 
-""""Stream Processing Pipline"""
-async def stream_video(file_path: Path):
+def stream_video(file_path: Path):
     """Generator function to stream video content"""
     with open(file_path, "rb") as video_file:
         while chunk := video_file.read(1024 * 1024):
             yield chunk
 
-@app.post("/upload-video")
-async def upload_video(file: UploadFile = File(...)):
+@app.post("/upload-video/{uid}")
+async def upload_video(
+    file: UploadFile = File(...), 
+    uid: str = FastAPIPath(...)  # Using the renamed FastAPI Path
+):
     try:
         # Validate file extension
         allowed_extensions = {".mp4", ".mov", ".avi"}
@@ -61,10 +65,16 @@ async def upload_video(file: UploadFile = File(...)):
                 detail=f"Invalid file type. Allowed: {', '.join(allowed_extensions)}"
             )
 
+        # Create UID-specific directories if they don't exist
+        upload_dir = UPLOAD_DIR / uid
+        output_dir = OUTPUT_DIR / uid
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
         # Generate unique filenames
         unique_filename = get_unique_filename(file.filename)
-        file_path = UPLOAD_DIR / unique_filename
-        output_path = OUTPUT_DIR / unique_filename
+        file_path = upload_dir / unique_filename
+        output_path = output_dir / unique_filename
 
         # Save uploaded file
         logger.info(f"Saving uploaded file to: {file_path}")
@@ -119,6 +129,106 @@ async def upload_video(file: UploadFile = File(...)):
         raise
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/videos/{uid}", response_model=List[Dict[str, str]])
+def get_video_list(uid: str = FastAPIPath(...)):
+    """
+    Returns a list of videos for the given UID.
+    Each video is represented as a JSON object with 'id' and 'name' fields.
+    """
+    try:
+        # Get the output directory for this UID
+        user_output_dir = OUTPUT_DIR / uid
+        
+        # Check if directory exists
+        if not user_output_dir.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"No videos found for user {uid}"
+            )
+        
+        video_files = []
+        
+        # Pattern to match the UUID prefix and capture both parts
+        pattern = re.compile(r"^([a-f0-9]{32})-(.+\.mp4)$")
+        
+        # Scan through all files in the directory
+        for file in user_output_dir.glob("*.mp4"):
+            match = pattern.match(file.name)
+            if match:
+                video_id = match.group(1)
+                video_name = match.group(2)
+                video_files.append({
+                    "id": video_id,
+                    "name": video_name
+                })
+        
+        if not video_files:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No valid video files found for user {uid}"
+            )
+            
+        return video_files
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting video list: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/videos/{uid}/{video_id}")
+def get_video(
+    uid: str = FastAPIPath(...),
+    video_id: str = FastAPIPath(...)
+):
+    """
+    Streams a specific video for the given UID and video ID.
+    """
+    try:
+        # Get the output directory for this UID
+        user_output_dir = OUTPUT_DIR / uid
+        
+        # Check if directory exists
+        if not user_output_dir.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"No videos found for user {uid}"
+            )
+        
+        # Find the video file with the matching ID
+        matching_files = list(user_output_dir.glob(f"{video_id}-*.mp4"))
+        
+        if not matching_files:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Video with ID {video_id} not found for user {uid}"
+            )
+        
+        # There should only be one matching file
+        video_path = matching_files[0]
+        
+        # Determine content type
+        content_type, _ = mimetypes.guess_type(video_path)
+        if content_type is None:
+            content_type = "video/mp4"  # default to mp4
+
+        # Return streaming response
+        return StreamingResponse(
+            stream_video(video_path),
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f"inline; filename={video_path.name}",
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "no-cache"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error streaming video: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
