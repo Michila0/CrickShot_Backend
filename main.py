@@ -9,7 +9,7 @@ import logging
 import mimetypes
 from typing import List, Dict, Optional
 import re
-
+from pydantic import BaseModel
 import mysql.connector
 from mysql.connector import Error
 
@@ -63,7 +63,10 @@ DB_CONFIG = {
     'user': 'root',
     'password': '' # Add your MySQL password here if you have one
 }
-
+class VideoResponse(BaseModel):
+    uuid: str
+    name: str
+    db_id: int
 # --- MySQL Database Manager Class ---
 class MySQLVideoManager:
     def __init__(self, host, database, user, password):
@@ -382,68 +385,51 @@ async def upload_video(
         # Ensure database connection is always closed
         manager.disconnect()
 
-@app.get("/videos/{uid}", response_model=List[Dict[str, str]])
-async def get_video_list(
-    uid: str = FastAPIPath(..., description="Unique user identifier")
-):
-    """
-    Retrieves a list of video metadata (ID and original filename) for the given UID from the database.
-    The 'id' in the response refers to the UUID part of the filename, used for streaming.
-    """
+@app.get("/videos/{uid}", response_model=List[VideoResponse]) # Use the Pydantic model here
+async def get_video_list(uid: str = FastAPIPath(..., description="Unique user identifier")):
     if not uid:
         raise HTTPException(status_code=400, detail="UID cannot be empty.")
 
     manager = MySQLVideoManager(**DB_CONFIG)
     if not manager.connect():
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to connect to the database. Please check server status and credentials."
-        )
+        raise HTTPException(status_code=500, detail="Failed to connect to the database.")
 
     try:
         db_videos = manager.get_videos_by_uid(uid)
         if not db_videos:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No videos found for user '{uid}' in the database."
-            )
+            return []
 
         video_list_response = []
-        # Pattern to match the UUID prefix and capture the original filename
         pattern = re.compile(r"^([a-f0-9]{32})-(.+)$", re.IGNORECASE)
 
         for video_record in db_videos:
-            # video_name in DB stores 'UUID-original_filename.ext'
             match = pattern.match(video_record['video_name'])
             if match:
-                # The 'id' in the response will be the UUID part for consistency with file-based lookup
-                video_uuid = match.group(1)
-                # The 'name' in the response will be the part after UUID (original_filename.ext)
-                original_display_name = match.group(2)
                 video_list_response.append({
-                    "id": video_uuid,
-                    "name": original_display_name
-                    # Note: We are not returning the full processed_filepath here for security/API simplicity
+                    "uuid": match.group(1),
+                    "name": match.group(2),
+                    "db_id": video_record['id'] # This will be correctly cast to an int
                 })
-            else:
-                logger.warning(f"Could not parse unique filename: {video_record['video_name']}. Skipping.")
-
-        if not video_list_response:
-             raise HTTPException(
-                status_code=404,
-                detail=f"No parsable video files found for user '{uid}' in the database."
-            )
-
         return video_list_response
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting video list for UID {uid}: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"An unexpected server error occurred: {str(e)}")
     finally:
         manager.disconnect()
 
+def stream_file(file_path: Path):
+    if not file_path.is_file():
+        raise FileNotFoundError(f"File not found: {file_path}")
+    with open(file_path, "rb") as file_like:
+        while chunk := file_like.read(1024 * 1024):
+            yield chunk
+            
+@app.get("/stream/{uid}/{video_id}")
+async def get_video_stream(uid: str, video_id: str):
+    user_output_dir = OUTPUT_DIR / uid
+    matching_files = list(user_output_dir.glob(f"{video_id}-*"))
+    if not matching_files:
+        raise HTTPException(status_code=404, detail="Video file not found.")
+    video_path = matching_files[0]
+    content_type, _ = mimetypes.guess_type(video_path)
+    return StreamingResponse(stream_file(video_path), media_type=content_type or "video/mp4", headers={"Accept-Ranges": "bytes"})
 
 @app.get("/videos/{uid}/{video_id}")
 async def get_video_stream(

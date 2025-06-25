@@ -68,7 +68,7 @@ def process_video(video_path, model_path, output_path=None):
 
     # Prepare video writer if output path is specified
     if output_path:
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        fourcc = cv2.VideoWriter_fourcc(*'avc1')
         out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
     # Process each frame

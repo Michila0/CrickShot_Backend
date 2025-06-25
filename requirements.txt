@@ -12,3 +12,4 @@ passlib
 firebase-admin
 python-dotenv
 mysql-connector-python
+pydantic
