@@ -13,24 +13,8 @@ from pydantic import BaseModel
 import mysql.connector
 from mysql.connector import Error
 
-# Assume video_classifier module exists and has classifyShot function
-try:
-    from video_classifier import classifyShot
-except ImportError:
-    # Fallback for local development if video_classifier isn't present
-    logging.warning("video_classifier.py not found. Using a dummy classifyShot function.")
-    def classifyShot(input_path: str, output_path: str) -> bool:
-        """Dummy function for video processing."""
-        logging.info(f"Dummy processing: Copying {input_path} to {output_path}")
-        try:
-            # Simulate processing by copying the file
-            with open(input_path, "rb") as infile, open(output_path, "wb") as outfile:
-                outfile.write(infile.read())
-            return True
-        except Exception as e:
-            logging.error(f"Dummy processing failed: {e}")
-            return False
 
+# Initialize FastAPI app
 app = FastAPI()
 
 # Configure logging
@@ -48,25 +32,44 @@ app.add_middleware(
 
 # Configure directories
 BASE_DIR = Path(__file__).parent
-UPLOAD_DIR = BASE_DIR / "uploads"
-OUTPUT_DIR = BASE_DIR / "outputs"
+UPLOAD_DIR = BASE_DIR / "uploads"  # Stores original uploaded files
+OUTPUT_DIR = BASE_DIR / "outputs"  # Stores processed video files
 
 # Create directories if they don't exist
 UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-# Global MySQL Database Configuration
-# IMPORTANT: Replace with your actual MySQL credentials
+# Database configuration
 DB_CONFIG = {
     'host': 'localhost',
-    'database': 'CricketVideo', # Ensure this database exists and has the 'videos' table
+    'database': 'CricketVideo', 
     'user': 'root',
-    'password': '' # Add your MySQL password here if you have one
+    'password': '' 
 }
+
+# Pydantic model for video response
 class VideoResponse(BaseModel):
     uuid: str
     name: str
     db_id: int
+
+# Fallback video processing function if classifier isn't available
+try:
+    from video_classifier import classifyShot
+except ImportError:
+    logging.warning("video_classifier.py not found. Using a dummy classifyShot function.")
+    def classifyShot(input_path: str, output_path: str) -> bool:
+        """Simulates video processing by copying the file"""
+        logging.info(f"Dummy processing: Copying {input_path} to {output_path}")
+        try:
+            # Simulate processing by copying the file
+            with open(input_path, "rb") as infile, open(output_path, "wb") as outfile:
+                outfile.write(infile.read())
+            return True
+        except Exception as e:
+            logging.error(f"Dummy processing failed: {e}")
+            return False
+        
 # --- MySQL Database Manager Class ---
 class MySQLVideoManager:
     def __init__(self, host, database, user, password):
@@ -140,15 +143,7 @@ class MySQLVideoManager:
                 cursor.close()
 
     def get_videos_by_uid(self, uid: str) -> List[Dict]:
-        """
-        Retrieves all video records associated with a specific user ID.
-
-        Args:
-            uid (str): The user ID.
-
-        Returns:
-            List[Dict]: A list of dictionaries, each representing a video record.
-        """
+        """Retrieves all video records associated with a specific user ID."""
         if not self.connection or not self.connection.is_connected():
             logger.error("Not connected to the database. Cannot retrieve videos.")
             return []
@@ -168,16 +163,7 @@ class MySQLVideoManager:
                 cursor.close()
 
     def get_video_by_db_id(self, db_video_id: int, uid: str) -> Optional[Dict]:
-        """
-        Retrieves a single video record by its database ID and UID.
-
-        Args:
-            db_video_id (int): The primary key ID of the video in the database.
-            uid (str): The user ID to ensure ownership.
-
-        Returns:
-            Optional[Dict]: A dictionary representing the video record, or None if not found.
-        """
+        """Gets single video by ID with user verification"""
         if not self.connection or not self.connection.is_connected():
             logger.error("Not connected to the database. Cannot retrieve video by ID.")
             return None
@@ -196,16 +182,7 @@ class MySQLVideoManager:
                 cursor.close()
 
     def delete_video_by_db_id(self, db_video_id: int, uid: str) -> bool:
-        """
-        Deletes a video record from the database by its primary key ID and UID.
-
-        Args:
-            db_video_id (int): The primary key ID of the video in the database.
-            uid (str): The user ID to ensure the video belongs to this user.
-
-        Returns:
-            bool: True if the record was deleted, False otherwise.
-        """
+        """Deletes video record from database"""
         if not self.connection or not self.connection.is_connected():
             logger.error("Not connected to the database. Cannot delete video metadata.")
             return False
@@ -251,11 +228,11 @@ def stream_video(file_path: Path):
 
 
 # --- FastAPI Endpoints ---
-
 @app.get("/")
 def read_root():
     return {"message": "Video File Upload and Management API"}
 
+# upload and process video file
 @app.post("/upload-video/{uid}")
 async def upload_video(
     file: UploadFile = File(...),
@@ -271,20 +248,17 @@ async def upload_video(
     # Validate file extension
     allowed_extensions = {".mp4", ".mov", ".avi"}
     file_ext = Path(file.filename).suffix.lower()
-
+    # Validate input
     if file_ext not in allowed_extensions:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid file type. Allowed: {', '.join(allowed_extensions)}"
-        )
+        raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: {', '.join(allowed_extensions)}")
 
-    # Create UID-specific directories if they don't exist
+    # Setup directories
     upload_dir = UPLOAD_DIR / uid
     output_dir = OUTPUT_DIR / uid
     upload_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Generate unique filenames
+    # Generate unique filename and paths
     original_filename = file.filename
     unique_filename = get_unique_filename(original_filename)
     uploaded_filepath = upload_dir / unique_filename
@@ -385,6 +359,7 @@ async def upload_video(
         # Ensure database connection is always closed
         manager.disconnect()
 
+# list user videos
 @app.get("/videos/{uid}", response_model=List[VideoResponse]) # Use the Pydantic model here
 async def get_video_list(uid: str = FastAPIPath(..., description="Unique user identifier")):
     if not uid:
@@ -420,7 +395,8 @@ def stream_file(file_path: Path):
     with open(file_path, "rb") as file_like:
         while chunk := file_like.read(1024 * 1024):
             yield chunk
-            
+
+# stream process video          
 @app.get("/stream/{uid}/{video_id}")
 async def get_video_stream(uid: str, video_id: str):
     user_output_dir = OUTPUT_DIR / uid
