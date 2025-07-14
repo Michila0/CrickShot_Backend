@@ -113,7 +113,7 @@ def create_model():
     return model
 
 
-"""Training and Evaluation Functions"""
+"""Training pipline and Evaluation Functions"""
 def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs=20, patience=5):
     best_val_loss = float('inf')
     best_model_weights = None
@@ -180,7 +180,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
 
     return model, train_losses, val_losses, train_accuracies, val_accuracies
 
-
+# Evaluation Function
 def evaluate_model(model, data_loader, criterion):
     model.eval() #set evaluation mode
     running_loss = 0.0

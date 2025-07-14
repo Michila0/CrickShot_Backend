@@ -1,4 +1,4 @@
-# Cricket Shot Detection
+# Cricket Shot Classification
 
 ### Install virtualenv
 
@@ -70,8 +70,3 @@ pip list
 ```
 
 <br>
-
-### Open Jupyter notebook
-```cmd
-jupyter notebook
-```

@@ -40,11 +40,18 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 # Database configuration
+# DB_CONFIG = {
+#     'host': 'localhost',
+#     'database': 'CricketVideo', 
+#     'user': 'root',
+#     'password': '' 
+# }
+
 DB_CONFIG = {
-    'host': 'localhost',
-    'database': 'CricketVideo', 
-    'user': 'root',
-    'password': '' 
+    'host': '198.37.120.210',  
+    'database': 'navicodes_CricketVideo',
+    'user': 'navicodes_michila',              
+    'password': 'Michila123'             
 }
 
 # Pydantic model for video response
@@ -96,7 +103,7 @@ class MySQLVideoManager:
                 return False
         except Error as e:
             logger.error(f"Error while connecting to MySQL: {e}")
-            self.connection = None # Ensure connection is None on failure
+            self.connection = None 
             return False
 
     def disconnect(self):
@@ -213,7 +220,6 @@ def get_unique_filename(original_name: str) -> str:
 
 def stream_video(file_path: Path):
     """Generator function to stream video content"""
-    # Ensure the file exists and is readable before attempting to open
     if not file_path.is_file() or not os.access(file_path, os.R_OK):
         logger.error(f"File not found or not readable: {file_path}")
         raise FileNotFoundError(f"File not found or not accessible: {file_path}")
@@ -347,7 +353,6 @@ async def upload_video(
         )
 
     except HTTPException:
-        # Re-raise HTTPExceptions as they are intended responses
         raise
     except FileNotFoundError as e:
         logger.error(f"File system error: {e}")
